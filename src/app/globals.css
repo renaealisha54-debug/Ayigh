@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 19% 9%;
+    --foreground: 210 40% 98%;
+    --card: 240 19% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 240 19% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 19% 15%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 240 19% 15%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 240 19% 18%;
+    --input: 240 19% 18%;
+    --ring: 239 84% 67%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-body;
+    background-image: 
+      radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
+      linear-gradient(rgba(18, 18, 26, 1), rgba(18, 18, 26, 0.98));
+  }
+}
+
+.scanline {
+  width: 100%;
+  height: 100px;
+  z-index: 99;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0) 0%, rgba(99, 102, 241, 0.02) 50%, rgba(0, 0, 0, 0) 100%);
+  opacity: 0.1;
+  position: absolute;
+  bottom: 100%;
+  animation: scanline 6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scanline {
+  0% { bottom: 100%; }
+  100% { bottom: -100px; }
+}
+
+.terminal-glow {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+}
+
+.hud-border {
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  position: relative;
+}
+
+.hud-border::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid hsl(var(--primary));
+  border-left: 2px solid hsl(var(--primary));
+}
+
+.hud-border::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-bottom: 2px solid hsl(var(--primary));
+  border-right: 2px solid hsl(var(--primary));
+}
