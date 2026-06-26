@@ -1,3 +1,181 @@
+#!/bin/bash
+set -e
+cd ~/ayigh
+
+echo "=== [1/7] Removing Supabase entirely ==="
+npm uninstall @supabase/supabase-js 2>/dev/null || true
+
+echo "=== [2/7] Rewriting workspace.ts — localStorage, no backend ==="
+cat > src/lib/workspace.ts << 'EOF'
+/**
+ * Workspace — local storage only, no backend needed
+ */
+
+export interface WorkspaceScript {
+  id: string;
+  name: string;
+  content: string;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  created_at: string;
+}
+
+const KEY = 'ayigh_scripts';
+
+function load(): WorkspaceScript[] {
+  try {
+    return JSON.parse(localStorage.getItem(KEY) ?? '[]');
+  } catch { return []; }
+}
+
+function save(scripts: WorkspaceScript[]) {
+  localStorage.setItem(KEY, JSON.stringify(scripts));
+}
+
+export async function saveScript(name: string, content: string): Promise<{ data: WorkspaceScript | null; error: string | null }> {
+  const scripts = load();
+  const entry: WorkspaceScript = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name, content, status: 'PENDING',
+    created_at: new Date().toISOString(),
+  };
+  scripts.unshift(entry);
+  save(scripts);
+  return { data: entry, error: null };
+}
+
+export async function loadScripts(): Promise<{ data: WorkspaceScript[]; error: string | null }> {
+  return { data: load(), error: null };
+}
+
+export async function updateScriptStatus(id: string, status: 'SUCCESS' | 'FAILED'): Promise<{ error: string | null }> {
+  const scripts = load().map(s => s.id === id ? { ...s, status } : s);
+  save(scripts);
+  return { error: null };
+}
+
+export async function deleteScript(id: string): Promise<{ error: string | null }> {
+  save(load().filter(s => s.id !== id));
+  return { error: null };
+}
+
+export async function saveScriptWithContent(name: string, content: string): Promise<{ data: WorkspaceScript | null; error: string | null }> {
+  return saveScript(name, content);
+}
+EOF
+
+echo "=== [3/7] Rewriting ai.ts — direct Gemini, no server ==="
+cat > src/lib/ai.ts << 'EOF'
+export interface Message { role: 'user' | 'assistant'; content: string; }
+export interface AIResponse {
+  text: string;
+  action?: {
+    type: 'shell' | 'phone' | 'call' | 'brightness' | 'volume' | 'wifi' | 'git' | 'open_termux';
+    payload: string;
+    description: string;
+  };
+}
+
+const SYSTEM = `You are ayigh, an AI command center assistant running on Android via a Next.js web app connected to Termux.
+
+You can control the phone through Termux:API. When the user wants to DO something, respond ONLY with this JSON:
+{
+  "text": "what you are doing",
+  "action": {
+    "type": "shell" | "brightness" | "volume" | "wifi" | "call" | "git" | "open_termux",
+    "payload": "command or value",
+    "description": "2-3 word label"
+  }
+}
+
+Examples:
+- "open termux" → {"text":"Opening Termux.","action":{"type":"open_termux","payload":"","description":"Open Termux"}}
+- "check battery" → {"text":"Checking battery.","action":{"type":"shell","payload":"termux-battery-status","description":"Battery Status"}}
+- "set brightness 80" → {"text":"Setting brightness to 80%.","action":{"type":"brightness","payload":"80","description":"Set Brightness"}}
+- "torch on" → {"text":"Turning torch on.","action":{"type":"shell","payload":"termux-torch on","description":"Torch On"}}
+- "git push" → {"text":"Pushing changes.","action":{"type":"git","payload":"git -C ~/ayigh add -A && git commit -m 'update' && git push","description":"Git Push"}}
+- "list downloads" → {"text":"Listing downloads.","action":{"type":"shell","payload":"ls ~/storage/downloads","description":"List Downloads"}}
+
+For pure questions with no device action, just reply with plain text. Be concise. You are speaking to Alisha who built you.`;
+
+export async function askAI(messages: Message[], userMessage: string): Promise<AIResponse> {
+  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) throw new Error('Add NEXT_PUBLIC_GEMINI_API_KEY to your .env file');
+
+  const history = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM }] },
+        contents: [...history, { role: 'user', parts: [{ text: userMessage }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+    throw new Error(err?.error?.message ?? 'Gemini request failed');
+  }
+
+  const data = await res.json();
+  const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+  // Try to parse JSON action
+  const match = raw.match(/\{[\s\S]*?"action"[\s\S]*?\}/);
+  if (match) { try { const p = JSON.parse(match[0]); if (p.text && p.action) return p; } catch {} }
+  try { const p = JSON.parse(raw.trim()); if (p.text && p.action) return p; } catch {}
+  return { text: raw };
+}
+
+export function speak(text: string) {
+  if (typeof window === 'undefined') return;
+  const synth = window.speechSynthesis;
+  if (synth) {
+    synth.cancel();
+    const utt = new SpeechSynthesisUtterance(text.slice(0, 300));
+    utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
+    const preferred = synth.getVoices().find(v => v.name.includes('Google') || v.name.includes('Samantha'));
+    if (preferred) utt.voice = preferred;
+    synth.speak(utt);
+    setTimeout(() => { if (!synth.speaking) tryTermuxTTS(text); }, 600);
+  } else {
+    tryTermuxTTS(text);
+  }
+}
+
+function tryTermuxTTS(text: string) {
+  try {
+    const ws = new WebSocket('ws://localhost:8765');
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ id: 'tts', command: `termux-tts-speak "${text.replace(/"/g, '').slice(0, 200)}"` }));
+      setTimeout(() => ws.close(), 6000);
+    };
+    ws.onerror = () => {};
+  } catch {}
+}
+EOF
+
+echo "=== [4/7] Removing ai-server.ts dependency ==="
+cat > src/lib/ai-server.ts << 'EOF'
+// Stub — all AI calls now go through src/lib/ai.ts directly (client-side)
+export {};
+EOF
+
+echo "=== [5/7] Patching VoiceAssistant.tsx — use askAI ==="
+# Replace askAIServer import with askAI
+sed -i "s/import { askAIServer } from '@\/lib\/ai-server';//" src/components/voice/VoiceAssistant.tsx
+sed -i "s/import { speak, type Message, type AIResponse } from '@\/lib\/ai';/import { askAI, speak, type Message, type AIResponse } from '@\/lib\/ai';/" src/components/voice/VoiceAssistant.tsx
+sed -i "s/const response = await askAIServer(history, text);/const response = await askAI(history, text);/" src/components/voice/VoiceAssistant.tsx
+
+echo "=== [6/7] Rewriting page.tsx — tabbed, no backend refs ==="
+cat > src/app/page.tsx << 'EOF'
 "use client"
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -217,3 +395,14 @@ export default function Home() {
     </div>
   );
 }
+EOF
+
+echo "=== [7/7] Cleaning .env — removing supabase keys ==="
+if [ -f .env ]; then
+  grep -v "SUPABASE" .env > .env.tmp && mv .env.tmp .env
+  echo ".env cleaned"
+fi
+
+echo ""
+echo "All done. Now run:"
+echo "  npm run build"

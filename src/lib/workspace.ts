@@ -1,12 +1,6 @@
-'use server';
-
-import { createClient } from '@supabase/supabase-js';
-
-// Server-side client uses the same anon key (RLS enforces security)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+/**
+ * Workspace — local storage only, no backend needed
+ */
 
 export interface WorkspaceScript {
   id: string;
@@ -16,63 +10,45 @@ export interface WorkspaceScript {
   created_at: string;
 }
 
-/**
- * Save a script to Supabase
- */
-export async function saveScript(
-  name: string,
-  content: string
-): Promise<{ data: WorkspaceScript | null; error: string | null }> {
-  const { data, error } = await supabase
-    .from('workspace_scripts')
-    .insert({ name, content, status: 'PENDING' })
-    .select()
-    .single();
+const KEY = 'ayigh_scripts';
 
-  if (error) return { data: null, error: error.message };
-  return { data, error: null };
+function load(): WorkspaceScript[] {
+  try {
+    return JSON.parse(localStorage.getItem(KEY) ?? '[]');
+  } catch { return []; }
 }
 
-/**
- * Load all scripts from Supabase
- */
-export async function loadScripts(): Promise<{
-  data: WorkspaceScript[];
-  error: string | null;
-}> {
-  const { data, error } = await supabase
-    .from('workspace_scripts')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(20);
-
-  if (error) return { data: [], error: error.message };
-  return { data: data ?? [], error: null };
+function save(scripts: WorkspaceScript[]) {
+  localStorage.setItem(KEY, JSON.stringify(scripts));
 }
 
-/**
- * Update a script's execution status
- */
-export async function updateScriptStatus(
-  id: string,
-  status: 'SUCCESS' | 'FAILED'
-): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from('workspace_scripts')
-    .update({ status })
-    .eq('id', id);
-
-  return { error: error?.message ?? null };
+export async function saveScript(name: string, content: string): Promise<{ data: WorkspaceScript | null; error: string | null }> {
+  const scripts = load();
+  const entry: WorkspaceScript = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name, content, status: 'PENDING',
+    created_at: new Date().toISOString(),
+  };
+  scripts.unshift(entry);
+  save(scripts);
+  return { data: entry, error: null };
 }
 
-/**
- * Delete a script by id
- */
+export async function loadScripts(): Promise<{ data: WorkspaceScript[]; error: string | null }> {
+  return { data: load(), error: null };
+}
+
+export async function updateScriptStatus(id: string, status: 'SUCCESS' | 'FAILED'): Promise<{ error: string | null }> {
+  const scripts = load().map(s => s.id === id ? { ...s, status } : s);
+  save(scripts);
+  return { error: null };
+}
+
 export async function deleteScript(id: string): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from('workspace_scripts')
-    .delete()
-    .eq('id', id);
+  save(load().filter(s => s.id !== id));
+  return { error: null };
+}
 
-  return { error: error?.message ?? null };
+export async function saveScriptWithContent(name: string, content: string): Promise<{ data: WorkspaceScript | null; error: string | null }> {
+  return saveScript(name, content);
 }

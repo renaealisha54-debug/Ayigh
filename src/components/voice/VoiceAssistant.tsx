@@ -4,8 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, Waves, Loader2, Send, User, Bot, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
-import { askAIServer } from '@/lib/ai-server';
-import { speak, type Message, type AIResponse } from '@/lib/ai';
+
+import { askAI, speak, type Message, type AIResponse } from '@/lib/ai';
 import { termuxRun, termuxAPI } from '@/lib/termux';
 import { setBrightness, setVolume, makeCall } from '@/lib/phone';
 
@@ -117,7 +117,7 @@ export function VoiceAssistant() {
         .filter(m => m.id !== 'init')
         .map(m => ({ role: m.role, content: m.content }));
 
-      const response = await askAIServer(history, text);
+      const response = await askAI(history, text);
 
       const assistantId = addMessage({
         role: 'assistant',
