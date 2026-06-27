@@ -1,3 +1,9 @@
+#!/bin/bash
+set -e
+cd ~/ayigh
+
+echo "=== [1/4] Rewriting page.tsx — pure command center, no AI ==="
+cat > src/app/page.tsx << 'PAGEOF'
 "use client"
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -398,3 +404,18 @@ function DeletePanel({ run, onResult }: { run: (c: string) => Promise<string>; o
     </div>
   );
 }
+PAGEOF
+
+echo "=== [2/4] Removing AI deps from package.json ==="
+npm uninstall @google/generative-ai 2>/dev/null || true
+
+echo "=== [3/4] Building ==="
+npm run build
+
+echo "=== [4/4] Syncing ==="
+npx cap sync android
+sed -i 's/VERSION_21/VERSION_17/g' android/app/capacitor.build.gradle
+sed -i 's/VERSION_21/VERSION_17/g' android/capacitor-cordova-android-plugins/build.gradle
+
+echo ""
+echo "Done! Now run: cd ~/ayigh/android && ./gradlew assembleDebug 2>&1 | tail -10"
